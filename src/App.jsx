@@ -226,7 +226,7 @@ function AdminConsole({ agents, inbox, addAgent, editAgent, removeAgent, sendMes
                 onKeyDown={(e) => e.key === "Enter" && attemptLogin()}
                 className="w-full px-3 py-2 pr-10 rounded-sm outline-none text-sm"
                 style={{ background: ink.bg, border: `1px solid ${pwError ? ink.stamp : ink.line}`, color: ink.text }}
-                placeholder="SHADOW9"
+                placeholder="••••••••"
               />
               <button
                 type="button"
@@ -239,7 +239,7 @@ function AdminConsole({ agents, inbox, addAgent, editAgent, removeAgent, sendMes
             </div>
             {pwError && (
               <div className="text-[11px] mt-2 flex items-center gap-1" style={{ color: ink.stamp }}>
-                <AlertTriangle size={12} /> Access denied — check the passphrase above the footer link
+                <AlertTriangle size={12} /> Access denied
               </div>
             )}
             <button
@@ -505,8 +505,28 @@ function AdminInboxView({ agent, messages, sendMessage }) {
 function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, open, setOpen }) {
   const [agentId, setAgentId] = useState("");
   const [clearing, setClearing] = useState(false);
+  const [idCode, setIdCode] = useState("");
+  const [idError, setIdError] = useState(false);
+  const idInputRef = useRef(null);
 
   const agent = agents.find((a) => a.id === agentId) || null;
+
+  useEffect(() => {
+    if (open && !agent) idInputRef.current?.focus();
+  }, [open, agent]);
+
+  function tryIdentify() {
+    const match = agents.find((a) => a.code === idCode);
+    if (match) {
+      setAgentId(match.id);
+      setIdCode("");
+      setIdError(false);
+    } else {
+      setIdError(true);
+      setIdCode("");
+      setTimeout(() => setIdError(false), 700);
+    }
+  }
 
   function handleClose() {
     if (agent) {
@@ -551,26 +571,30 @@ function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, op
             </div>
           ) : !agent ? (
             <div className="flex-1 p-5 flex flex-col justify-center">
-              <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: ink.muted }}>
-                Identify yourself
+              <div className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1" style={{ color: ink.muted }}>
+                <KeyRound size={12} /> Enter your code
               </div>
-              {agents.length === 0 ? (
-                <div className="text-xs" style={{ color: ink.muted }}>No agents on file. Ask your admin to add you.</div>
-              ) : (
-                <div className="space-y-2">
-                  {agents.map((a) => (
-                    <button
-                      key={a.id}
-                      onClick={() => setAgentId(a.id)}
-                      className="w-full text-left px-3 py-2 rounded-sm text-sm"
-                      style={{ background: ink.bg, border: `1px solid ${ink.line}` }}
-                    >
-                      <div>{a.name}</div>
-                      <div className="text-[10px] tracking-[0.2em]" style={{ color: ink.muted }}>ID {a.id.slice(0, 6)}</div>
-                    </button>
-                  ))}
+              <input
+                ref={idInputRef}
+                value={idCode}
+                onChange={(e) => setIdCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
+                onKeyDown={(e) => e.key === "Enter" && tryIdentify()}
+                className="w-full px-3 py-2 text-sm rounded-sm outline-none tracking-[0.4em] text-center mb-3"
+                style={{ background: ink.bg, border: `1px solid ${idError ? ink.stamp : ink.line}`, color: ink.text }}
+                placeholder="—  —  —"
+              />
+              {idError && (
+                <div className="text-[11px] mb-3 flex items-center gap-1" style={{ color: ink.stamp }}>
+                  <AlertTriangle size={12} /> Kode tidak dikenali
                 </div>
               )}
+              <button
+                onClick={tryIdentify}
+                className="w-full py-2 rounded-sm text-xs uppercase tracking-widest font-bold"
+                style={{ background: ink.green, color: ink.bg }}
+              >
+                Enter
+              </button>
             </div>
           ) : (
             <AgentThread
