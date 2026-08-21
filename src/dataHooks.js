@@ -23,32 +23,37 @@ export function useAgents() {
         setLoaded(true);
       });
 
-    const channel = supabase
-      .channel("agents-all")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "agents" },
-        (payload) => {
-          setAgents((prev) => {
-            if (payload.eventType === "INSERT") {
-              if (prev.some((a) => a.id === payload.new.id)) return prev;
-              return [...prev, payload.new];
-            }
-            if (payload.eventType === "UPDATE") {
-              return prev.map((a) => (a.id === payload.new.id ? payload.new : a));
-            }
-            if (payload.eventType === "DELETE") {
-              return prev.filter((a) => a.id !== payload.old.id);
-            }
-            return prev;
-          });
-        }
-      )
-      .subscribe();
+    let channel;
+    try {
+      channel = supabase
+        .channel(`agents-all-${Math.random().toString(36).slice(2, 9)}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "agents" },
+          (payload) => {
+            setAgents((prev) => {
+              if (payload.eventType === "INSERT") {
+                if (prev.some((a) => a.id === payload.new.id)) return prev;
+                return [...prev, payload.new];
+              }
+              if (payload.eventType === "UPDATE") {
+                return prev.map((a) => (a.id === payload.new.id ? payload.new : a));
+              }
+              if (payload.eventType === "DELETE") {
+                return prev.filter((a) => a.id !== payload.old.id);
+              }
+              return prev;
+            });
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      setError(e?.message || String(e));
+    }
 
     return () => {
       active = false;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 
@@ -121,34 +126,39 @@ export function useAgentMessages(agentId) {
         if (data) setMessages(data);
       });
 
-    const channel = supabase
-      .channel(`messages-${agentId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `agent_id=eq.${agentId}` },
-        (payload) => {
-          setMessages((prev) => {
-            if (payload.eventType === "INSERT") {
-              if (prev.some((m) => m.id === payload.new.id)) return prev;
-              return [...prev, payload.new].sort(
-                (a, b) => new Date(a.created_at) - new Date(b.created_at)
-              );
-            }
-            if (payload.eventType === "UPDATE") {
-              return prev.map((m) => (m.id === payload.new.id ? payload.new : m));
-            }
-            if (payload.eventType === "DELETE") {
-              return prev.filter((m) => m.id !== payload.old.id);
-            }
-            return prev;
-          });
-        }
-      )
-      .subscribe();
+    let channel;
+    try {
+      channel = supabase
+        .channel(`messages-${agentId}-${Math.random().toString(36).slice(2, 9)}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "messages", filter: `agent_id=eq.${agentId}` },
+          (payload) => {
+            setMessages((prev) => {
+              if (payload.eventType === "INSERT") {
+                if (prev.some((m) => m.id === payload.new.id)) return prev;
+                return [...prev, payload.new].sort(
+                  (a, b) => new Date(a.created_at) - new Date(b.created_at)
+                );
+              }
+              if (payload.eventType === "UPDATE") {
+                return prev.map((m) => (m.id === payload.new.id ? payload.new : m));
+              }
+              if (payload.eventType === "DELETE") {
+                return prev.filter((m) => m.id !== payload.old.id);
+              }
+              return prev;
+            });
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      setError(e?.message || String(e));
+    }
 
     return () => {
       active = false;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [agentId]);
 
