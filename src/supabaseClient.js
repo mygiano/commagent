@@ -12,3 +12,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "");
+
+// Small diagnostic export so the UI can show whether env vars were picked
+// up at all, without exposing the full anon key on screen.
+export const supabaseStatus = {
+  configured: Boolean(supabaseUrl && supabaseAnonKey),
+  host: (() => {
+    try {
+      return supabaseUrl ? new URL(supabaseUrl).host : "";
+    } catch {
+      return "URL tidak valid";
+    }
+  })(),
+};

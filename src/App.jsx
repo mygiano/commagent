@@ -4,6 +4,7 @@ import {
   Pencil, KeyRound, LogOut, Radio, AlertTriangle, ChevronLeft, Eye, EyeOff, Lock, CornerUpLeft,
 } from "lucide-react";
 import { useAgents, useAgentMessages } from "./dataHooks";
+import { supabaseStatus } from "./supabaseClient";
 
 /* ---------------------------------------------------------------
    CONFIG
@@ -221,6 +222,11 @@ function AdminConsole({ agents, addAgent, editAgent, removeAgent, onExit }) {
           >
             <ChevronLeft size={12} /> Back to site
           </button>
+          <div className="mt-4 pt-4 border-t text-[10px] text-center" style={{ borderColor: ink.line, color: supabaseStatus.configured ? ink.green : ink.stamp }}>
+            {supabaseStatus.configured
+              ? `Supabase: connected (${supabaseStatus.host})`
+              : "Supabase: NOT CONFIGURED — cek env var VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY di Vercel, lalu redeploy"}
+          </div>
         </div>
       </div>
     );
@@ -413,7 +419,7 @@ function AdminInboxView({ agent }) {
                 <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: mine ? ink.greenDim : ink.panel2, border: `1px solid ${ink.line}` }}>
                   {m.reply_to && (
                     <div className="mb-1 pl-2 text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.green}` }}>
-                      {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
+                      {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                     </div>
                   )}
                   {m.text}
@@ -667,7 +673,7 @@ function AgentThread({ agent, onSwitch }) {
                   <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: ink.greenDim, border: `1px solid ${ink.line}` }}>
                     {m.reply_to && (
                       <div className="mb-1 pl-2 text-left text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.bg}` }}>
-                        {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
+                        {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                       </div>
                     )}
                     {m.text}
@@ -684,7 +690,7 @@ function AgentThread({ agent, onSwitch }) {
                   <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: ink.panel2, border: `1px solid ${ink.line}` }}>
                     {m.reply_to && (
                       <div className="mb-1 pl-2 text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.green}` }}>
-                        {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
+                        {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                       </div>
                     )}
                     {m.text}
