@@ -3,12 +3,12 @@ import {
   X, Send, Shield, UserPlus, Trash2,
   Pencil, KeyRound, LogOut, Radio, AlertTriangle, ChevronLeft, Eye, EyeOff, Lock, CornerUpLeft,
 } from "lucide-react";
+import { useAgents, useAgentMessages } from "./dataHooks";
 
 /* ---------------------------------------------------------------
    CONFIG
 --------------------------------------------------------------- */
 const ADMIN_PASSWORD = "SHADOW9"; // change this before real use
-const ADMIN_ID = "ADMIN";
 
 const ink = {
   bg: "#0B0E0C",
@@ -27,12 +27,6 @@ const mono = {
     "'IBM Plex Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace",
 };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-function now() {
-  return new Date().toISOString();
-}
 function fmtTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -40,40 +34,14 @@ function fmtTime(iso) {
 
 /* ---------------------------------------------------------------
    ROOT APP
-   All data lives here as plain React state, shared live between the
-   public site, the admin console, and the chat widget. This avoids
-   depending on a persistent-storage backend that wasn't behaving
-   reliably in this environment — everything updates instantly and
-   in sync, at the cost of resetting on a full page reload.
+   Agents + messages now live in Supabase (Postgres + Realtime), so
+   the admin console and the agent widget stay in sync across any
+   device or browser — not just within one page session.
 --------------------------------------------------------------- */
 export default function App() {
-  const [agents, setAgents] = useState([]);
-  const [inbox, setInbox] = useState({}); // { [agentId]: Message[] }
-  const [clearedMap, setClearedMap] = useState({}); // { [agentId]: isoTimestamp }
+  const { agents, addAgent, editAgent, removeAgent, clearAgentView } = useAgents();
   const [view, setView] = useState("site"); // 'site' | 'admin'
   const [widgetOpen, setWidgetOpen] = useState(false);
-
-  function addAgent(agent) {
-    setAgents((prev) => [...prev, agent]);
-  }
-  function editAgent(id, updates) {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
-  }
-  function removeAgent(id) {
-    setAgents((prev) => prev.filter((a) => a.id !== id));
-    setInbox((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  }
-  function sendMessage(agentId, from, text, replyTo) {
-    const msg = { id: uid(), from, to: from === ADMIN_ID ? agentId : ADMIN_ID, text, ts: now(), replyTo: replyTo || null };
-    setInbox((prev) => ({ ...prev, [agentId]: [...(prev[agentId] || []), msg] }));
-  }
-  function clearAgentView(agentId) {
-    setClearedMap((prev) => ({ ...prev, [agentId]: now() }));
-  }
 
   return (
     <div
@@ -84,20 +52,15 @@ export default function App() {
       {view === "admin" && (
         <AdminConsole
           agents={agents}
-          inbox={inbox}
           addAgent={addAgent}
           editAgent={editAgent}
           removeAgent={removeAgent}
-          sendMessage={sendMessage}
           onExit={() => setView("site")}
         />
       )}
 
       <ChatWidget
         agents={agents}
-        inbox={inbox}
-        clearedMap={clearedMap}
-        sendMessage={sendMessage}
         clearAgentView={clearAgentView}
         open={widgetOpen}
         setOpen={setWidgetOpen}
@@ -185,7 +148,7 @@ function SiteHome({ onAdmin }) {
 /* ---------------------------------------------------------------
    ADMIN CONSOLE
 --------------------------------------------------------------- */
-function AdminConsole({ agents, inbox, addAgent, editAgent, removeAgent, sendMessage, onExit }) {
+function AdminConsole({ agents, addAgent, editAgent, removeAgent, onExit }) {
   const [authed, setAuthed] = useState(false);
   const [pwInput, setPwInput] = useState("");
   const [pwError, setPwError] = useState(false);
@@ -266,17 +229,15 @@ function AdminConsole({ agents, inbox, addAgent, editAgent, removeAgent, sendMes
   return (
     <AdminDashboard
       agents={agents}
-      inbox={inbox}
       addAgent={addAgent}
       editAgent={editAgent}
       removeAgent={removeAgent}
-      sendMessage={sendMessage}
       onExit={onExit}
     />
   );
 }
 
-function AdminDashboard({ agents, inbox, addAgent, editAgent, removeAgent, sendMessage, onExit }) {
+function AdminDashboard({ agents, addAgent, editAgent, removeAgent, onExit }) {
   const [selected, setSelected] = useState(null);
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
@@ -291,11 +252,12 @@ function AdminDashboard({ agents, inbox, addAgent, editAgent, removeAgent, sendM
     return "";
   }
 
-  function handleAddAgent() {
+  async function handleAddAgent() {
     const err = validCode(newCode, null);
     if (!newName.trim()) return setFormError("Name required");
     if (err) return setFormError(err);
-    addAgent({ id: uid(), name: newName.trim(), code: newCode });
+    const { error: dbErr } = await addAgent(newName.trim(), newCode);
+    if (dbErr) return setFormError(dbErr.message);
     setNewName(""); setNewCode(""); setFormError("");
   }
 
@@ -304,12 +266,12 @@ function AdminDashboard({ agents, inbox, addAgent, editAgent, removeAgent, sendM
     if (selected === id) setSelected(null);
   }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     const err = validCode(editCode, id);
     if (!editName.trim()) return;
     if (err) return;
-    editAgent(id, { name: editName.trim(), code: editCode });
-    setEditingId(null);
+    const { error: dbErr } = await editAgent(id, { name: editName.trim(), code: editCode });
+    if (!dbErr) setEditingId(null);
   }
 
   const selectedAgent = agents.find((a) => a.id === selected) || null;
@@ -391,11 +353,7 @@ function AdminDashboard({ agents, inbox, addAgent, editAgent, removeAgent, sendM
               Select an agent to view their private line
             </div>
           ) : (
-            <AdminInboxView
-              agent={selectedAgent}
-              messages={inbox[selectedAgent.id] || []}
-              sendMessage={sendMessage}
-            />
+            <AdminInboxView agent={selectedAgent} />
           )}
         </div>
       </div>
@@ -403,7 +361,8 @@ function AdminDashboard({ agents, inbox, addAgent, editAgent, removeAgent, sendM
   );
 }
 
-function AdminInboxView({ agent, messages, sendMessage }) {
+function AdminInboxView({ agent }) {
+  const { messages, send } = useAgentMessages(agent.id);
   const [text, setText] = useState("");
   const [replyingTo, setReplyingTo] = useState(null); // { id, text, label }
   const scrollRef = useRef(null);
@@ -423,9 +382,9 @@ function AdminInboxView({ agent, messages, sendMessage }) {
     inputRef.current?.focus();
   }
 
-  function send() {
+  async function submit() {
     if (!text.trim()) return;
-    sendMessage(agent.id, ADMIN_ID, text.trim(), replyingTo);
+    await send("admin", text.trim(), replyingTo);
     setText("");
     setReplyingTo(null);
   }
@@ -442,7 +401,7 @@ function AdminInboxView({ agent, messages, sendMessage }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 mb-4" style={{ maxHeight: 420 }}>
         {messages.length === 0 && <div className="text-xs" style={{ color: ink.muted }}>No messages yet.</div>}
         {messages.map((m) => {
-          const mine = m.from === ADMIN_ID;
+          const mine = m.sender === "admin";
           return (
             <div key={m.id} className={`max-w-sm group ${mine ? "ml-auto text-right" : ""}`}>
               <div className={`flex items-end gap-1 ${mine ? "justify-end" : ""}`}>
@@ -452,9 +411,9 @@ function AdminInboxView({ agent, messages, sendMessage }) {
                   </button>
                 )}
                 <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: mine ? ink.greenDim : ink.panel2, border: `1px solid ${ink.line}` }}>
-                  {m.replyTo && (
+                  {m.reply_to && (
                     <div className="mb-1 pl-2 text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.green}` }}>
-                      {m.replyTo.text.length > 60 ? m.replyTo.text.slice(0, 60) + "…" : m.replyTo.text}
+                      {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
                     </div>
                   )}
                   {m.text}
@@ -465,7 +424,7 @@ function AdminInboxView({ agent, messages, sendMessage }) {
                   </button>
                 )}
               </div>
-              <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.ts)}</div>
+              <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.created_at)}</div>
             </div>
           );
         })}
@@ -486,12 +445,12 @@ function AdminInboxView({ agent, messages, sendMessage }) {
           ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder={`Message ${agent.name}...`}
           className="flex-1 px-3 py-2 text-xs rounded-sm outline-none"
           style={{ background: ink.bg, border: `1px solid ${ink.line}`, color: ink.text }}
         />
-        <button onClick={send} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg }}>
+        <button onClick={submit} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg }}>
           <Send size={14} />
         </button>
       </div>
@@ -502,7 +461,7 @@ function AdminInboxView({ agent, messages, sendMessage }) {
 /* ---------------------------------------------------------------
    CHAT WIDGET (the special feature)
 --------------------------------------------------------------- */
-function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, open, setOpen }) {
+function ChatWidget({ agents, clearAgentView, open, setOpen }) {
   const [agentId, setAgentId] = useState("");
   const [clearing, setClearing] = useState(false);
   const [idCode, setIdCode] = useState("");
@@ -528,10 +487,10 @@ function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, op
     }
   }
 
-  function handleClose() {
+  async function handleClose() {
     if (agent) {
       setClearing(true);
-      clearAgentView(agent.id); // clears this agent's view only — admin keeps full history
+      await clearAgentView(agent.id); // clears this agent's view only — admin keeps full history
       setTimeout(() => {
         setClearing(false);
         setOpen(false);
@@ -597,13 +556,7 @@ function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, op
               </button>
             </div>
           ) : (
-            <AgentThread
-              agent={agent}
-              messages={inbox[agent.id] || []}
-              clearedAt={clearedMap[agent.id] || null}
-              sendMessage={sendMessage}
-              onSwitch={() => setAgentId("")}
-            />
+            <AgentThread agent={agent} onSwitch={() => setAgentId("")} />
           )}
         </div>
       )}
@@ -611,7 +564,8 @@ function ChatWidget({ agents, inbox, clearedMap, sendMessage, clearAgentView, op
   );
 }
 
-function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
+function AgentThread({ agent, onSwitch }) {
+  const { messages, send } = useAgentMessages(agent.id);
   const [text, setText] = useState("");
   const [sendError, setSendError] = useState("");
   const [unlocked, setUnlocked] = useState({}); // { [msgId]: true } — resets whenever this thread remounts (i.e. on close/reopen)
@@ -620,8 +574,9 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
-  const visible = clearedAt ? messages.filter((m) => new Date(m.ts) > new Date(clearedAt)) : messages;
-  const lockedCount = visible.filter((m) => m.from !== agent.id && !unlocked[m.id]).length;
+  const clearedAt = agent.cleared_at || null;
+  const visible = clearedAt ? messages.filter((m) => new Date(m.created_at) > new Date(clearedAt)) : messages;
+  const lockedCount = visible.filter((m) => m.sender !== "agent" && !unlocked[m.id]).length;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -646,7 +601,7 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
   //  1. "<message> <3-digit code>"  -> send that message (code stripped, verified against agent's code)
   //  2. "<3-digit code>" alone      -> unlock every currently locked incoming message at once
   //  3. anything else / missing code at the end -> "No code" error
-  function handleSubmit() {
+  async function handleSubmit() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -668,7 +623,7 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
       setUnlocked((u) => {
         const next = { ...u };
         visible.forEach((m) => {
-          if (m.from !== agent.id) next[m.id] = true;
+          if (m.sender !== "agent") next[m.id] = true;
         });
         return next;
       });
@@ -684,7 +639,7 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
       return;
     }
     const messageText = tokens.slice(0, -1).join(" ");
-    sendMessage(agent.id, agent.id, messageText, replyingTo);
+    await send("agent", messageText, replyingTo);
     setText("");
     setReplyingTo(null);
   }
@@ -701,7 +656,7 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {visible.length === 0 && <div className="text-xs" style={{ color: ink.muted }}>No transmissions yet.</div>}
         {visible.map((m) => {
-          const mine = m.from === agent.id;
+          const mine = m.sender === "agent";
           if (mine) {
             return (
               <div key={m.id} className="max-w-[80%] ml-auto text-right">
@@ -710,15 +665,15 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
                     <CornerUpLeft size={13} />
                   </button>
                   <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: ink.greenDim, border: `1px solid ${ink.line}` }}>
-                    {m.replyTo && (
+                    {m.reply_to && (
                       <div className="mb-1 pl-2 text-left text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.bg}` }}>
-                        {m.replyTo.text.length > 60 ? m.replyTo.text.slice(0, 60) + "…" : m.replyTo.text}
+                        {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
                       </div>
                     )}
                     {m.text}
                   </div>
                 </div>
-                <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.ts)}</div>
+                <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.created_at)}</div>
               </div>
             );
           }
@@ -727,9 +682,9 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
               {unlocked[m.id] ? (
                 <div className="flex items-end gap-1" style={{ opacity: justUnlockedFlash ? 0.5 : 1, transition: "opacity 0.35s ease" }}>
                   <div className="inline-block px-3 py-2 rounded-md text-xs" style={{ background: ink.panel2, border: `1px solid ${ink.line}` }}>
-                    {m.replyTo && (
+                    {m.reply_to && (
                       <div className="mb-1 pl-2 text-[10px] opacity-70" style={{ borderLeft: `2px solid ${ink.green}` }}>
-                        {m.replyTo.text.length > 60 ? m.replyTo.text.slice(0, 60) + "…" : m.replyTo.text}
+                        {m.reply_to.text.length > 60 ? m.reply_to.text.slice(0, 60) + "…" : m.reply_to.text}
                       </div>
                     )}
                     {m.text}
@@ -743,7 +698,7 @@ function AgentThread({ agent, messages, clearedAt, sendMessage, onSwitch }) {
                   <Lock size={12} /> New message
                 </div>
               )}
-              <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.ts)}</div>
+              <div className="text-[10px] mt-1" style={{ color: ink.muted }}>{fmtTime(m.created_at)}</div>
             </div>
           );
         })}
