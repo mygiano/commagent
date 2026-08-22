@@ -21,17 +21,20 @@ values ('chat-files', 'chat-files', true)
 on conflict (id) do nothing;
 
 -- Izinkan siapa pun (pemegang anon key) upload & lihat & hapus file di bucket ini
-create policy if not exists "chat-files public insert"
+drop policy if exists "chat-files public insert" on storage.objects;
+create policy "chat-files public insert"
 on storage.objects for insert
 to public
 with check (bucket_id = 'chat-files');
 
-create policy if not exists "chat-files public select"
+drop policy if exists "chat-files public select" on storage.objects;
+create policy "chat-files public select"
 on storage.objects for select
 to public
 using (bucket_id = 'chat-files');
 
-create policy if not exists "chat-files public delete"
+drop policy if exists "chat-files public delete" on storage.objects;
+create policy "chat-files public delete"
 on storage.objects for delete
 to public
 using (bucket_id = 'chat-files');
