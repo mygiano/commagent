@@ -728,7 +728,7 @@ function AdminInboxView({ agent }) {
       )}
 
       <div className="flex gap-2">
-        <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
+        <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" onChange={pickFile} className="hidden" />
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
         {recorder.isRecording ? (
           <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
@@ -1097,7 +1097,7 @@ function AgentThread({ agent, onSwitch }) {
           </div>
         )}
         <div className="flex gap-2 items-center">
-          <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
+          <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" onChange={pickFile} className="hidden" />
           <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
           {recorder.isRecording ? (
             <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
