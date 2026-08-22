@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   X, Send, Shield, UserPlus, Trash2,
   Pencil, KeyRound, LogOut, Radio, AlertTriangle, ChevronLeft, Eye, EyeOff, Lock, CornerUpLeft,
-  Paperclip, FileText, Download,
+  Paperclip, FileText, Download, Camera, Mic, Square,
 } from "lucide-react";
 import { useAgents, useAgentMessages } from "./dataHooks";
 import { supabaseStatus } from "./supabaseClient";
@@ -41,7 +41,80 @@ function fmtSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function fmtDuration(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — keep uploads snappy on mobile
+
+// Records a short voice note via the mic and hands back a File once stopped,
+// via onDone(file). Shared by both the admin composer and the agent composer.
+function useVoiceRecorder(onDone, onError) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const timerRef = useRef(null);
+
+  function cleanupStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    clearInterval(timerRef.current);
+  }
+
+  async function start() {
+    if (isRecording) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      onError?.("Perangkat ini tidak mendukung rekam suara");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+        const ext = (mr.mimeType || "audio/webm").includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `voice-note-${Date.now()}.${ext}`, { type: blob.type });
+        cleanupStream();
+        onDone(file);
+      };
+      recorderRef.current = mr;
+      mr.start();
+      setIsRecording(true);
+      setSeconds(0);
+      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    } catch (e) {
+      onError?.("Tidak bisa akses microphone — izin ditolak?");
+    }
+  }
+
+  function stop() {
+    if (!isRecording) return;
+    recorderRef.current?.stop();
+    setIsRecording(false);
+  }
+
+  function cancel() {
+    if (recorderRef.current) {
+      recorderRef.current.onstop = null;
+      recorderRef.current.stop();
+    }
+    cleanupStream();
+    setIsRecording(false);
+  }
+
+  useEffect(() => () => cleanupStream(), []);
+
+  return { isRecording, seconds, start, stop, cancel };
+}
 
 // Renders a message's file attachment, if any. Handles the "expired"
 // case (file auto-deleted after 30 days, file_url is null but the
@@ -57,6 +130,7 @@ function AttachmentView({ m }) {
   if (!m.file_url) return null;
 
   const isImage = (m.file_type || "").startsWith("image/");
+  const isAudio = (m.file_type || "").startsWith("audio/");
 
   if (isImage) {
     return (
@@ -68,6 +142,14 @@ function AttachmentView({ m }) {
           style={{ border: `1px solid ${ink.line}` }}
         />
       </a>
+    );
+  }
+
+  if (isAudio) {
+    return (
+      <div className="mb-1">
+        <audio controls src={m.file_url} style={{ height: 32, maxWidth: 220 }} />
+      </div>
     );
   }
 
@@ -433,6 +515,17 @@ function AdminInboxView({ agent }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  function showFileError(msg) {
+    setFileError(msg);
+    setTimeout(() => setFileError(""), 2200);
+  }
+
+  const recorder = useVoiceRecorder(
+    (file) => setPendingFile(file),
+    (msg) => showFileError(msg)
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -453,8 +546,7 @@ function AdminInboxView({ agent }) {
     e.target.value = "";
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
-      setFileError("File maksimal 10MB");
-      setTimeout(() => setFileError(""), 2000);
+      showFileError("File maksimal 10MB");
       return;
     }
     setPendingFile(file);
@@ -467,8 +559,7 @@ function AdminInboxView({ agent }) {
     const { error } = await send("admin", text.trim(), replyingTo, pendingFile);
     setUploading(false);
     if (error) {
-      setFileError(error.message);
-      setTimeout(() => setFileError(""), 2500);
+      showFileError(error.message);
       return;
     }
     setText("");
@@ -548,21 +639,41 @@ function AdminInboxView({ agent }) {
 
       <div className="flex gap-2">
         <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
-        <button onClick={() => fileInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
-          <Paperclip size={14} />
-        </button>
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder={pendingFile ? "Caption (opsional)..." : `Message ${agent.name}...`}
-          className="flex-1 px-3 py-2 text-xs rounded-sm outline-none"
-          style={{ background: ink.bg, border: `1px solid ${ink.line}`, color: ink.text }}
-        />
-        <button onClick={submit} disabled={uploading} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}>
-          {uploading ? <span className="text-[10px]">…</span> : <Send size={14} />}
-        </button>
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
+        {recorder.isRecording ? (
+          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
+            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: ink.stamp }} />
+            <span className="text-xs" style={{ color: ink.text }}>Merekam… {fmtDuration(recorder.seconds)}</span>
+            <button onClick={() => recorder.cancel()} className="ml-auto text-[10px] uppercase tracking-widest" style={{ color: ink.muted }}>Batal</button>
+            <button onClick={() => recorder.stop()} className="px-2 py-1 rounded-sm" style={{ background: ink.stamp }}>
+              <Square size={12} color="#fff" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <button onClick={() => fileInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <Paperclip size={14} />
+            </button>
+            <button onClick={() => cameraInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <Camera size={14} />
+            </button>
+            <button onClick={() => recorder.start()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <Mic size={14} />
+            </button>
+            <input
+              ref={inputRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder={pendingFile ? "Caption (opsional)..." : `Message ${agent.name}...`}
+              className="flex-1 px-3 py-2 text-xs rounded-sm outline-none"
+              style={{ background: ink.bg, border: `1px solid ${ink.line}`, color: ink.text }}
+            />
+            <button onClick={submit} disabled={uploading} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}>
+              {uploading ? <span className="text-[10px]">…</span> : <Send size={14} />}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -686,6 +797,12 @@ function AgentThread({ agent, onSwitch }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  const recorder = useVoiceRecorder(
+    (file) => setPendingFile(file),
+    (msg) => flashError(msg)
+  );
 
   const clearedAt = agent.cleared_at || null;
   const visible = clearedAt ? messages.filter((m) => new Date(m.created_at) > new Date(clearedAt)) : messages;
@@ -876,29 +993,49 @@ function AgentThread({ agent, onSwitch }) {
         )}
         <div className="flex gap-2 items-center">
           <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
-            <Paperclip size={14} />
-          </button>
-          <div className="relative flex-1">
-            <KeyRound size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: ink.muted }} />
-            <input
-              ref={inputRef}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              placeholder="Type message..."
-              className="w-full pl-7 pr-3 py-2 text-xs rounded-sm outline-none"
-              style={{ background: ink.bg, border: `1px solid ${sendError ? ink.stamp : ink.line}`, color: ink.text }}
-            />
-          </div>
-          <button
-            onClick={handleSubmit}
-            disabled={uploading}
-            className="px-3 py-2 rounded-sm flex items-center gap-1 text-[11px] uppercase tracking-widest font-bold"
-            style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}
-          >
-            {uploading ? <span className="text-[10px]">…</span> : <Send size={13} />}
-          </button>
+          <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
+          {recorder.isRecording ? (
+            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
+              <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: ink.stamp }} />
+              <span className="text-xs" style={{ color: ink.text }}>Merekam… {fmtDuration(recorder.seconds)}</span>
+              <button onClick={() => recorder.cancel()} className="ml-auto text-[10px] uppercase tracking-widest" style={{ color: ink.muted }}>Batal</button>
+              <button onClick={() => recorder.stop()} className="px-2 py-1 rounded-sm" style={{ background: ink.stamp }}>
+                <Square size={12} color="#fff" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+                <Paperclip size={14} />
+              </button>
+              <button onClick={() => cameraInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+                <Camera size={14} />
+              </button>
+              <button onClick={() => recorder.start()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+                <Mic size={14} />
+              </button>
+              <div className="relative flex-1">
+                <KeyRound size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: ink.muted }} />
+                <input
+                  ref={inputRef}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                  placeholder="Type message..."
+                  className="w-full pl-7 pr-3 py-2 text-xs rounded-sm outline-none"
+                  style={{ background: ink.bg, border: `1px solid ${sendError ? ink.stamp : ink.line}`, color: ink.text }}
+                />
+              </div>
+              <button
+                onClick={handleSubmit}
+                disabled={uploading}
+                className="px-3 py-2 rounded-sm flex items-center gap-1 text-[11px] uppercase tracking-widest font-bold"
+                style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}
+              >
+                {uploading ? <span className="text-[10px]">…</span> : <Send size={13} />}
+              </button>
+            </>
+          )}
         </div>
         <div className="text-[9px] tracking-wide" style={{ color: ink.muted, opacity: 0.65 }}>
           akhiri dengan kodemu untuk kirim · kirim kode saja untuk buka pesan
