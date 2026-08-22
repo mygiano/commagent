@@ -171,6 +171,87 @@ function AttachmentView({ m }) {
   );
 }
 
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+// Desktop-only fallback for the camera button: a small modal with a live
+// webcam preview and a shutter button. On mobile we skip this entirely and
+// use the native camera via <input capture> instead, which feels better there.
+function WebcamCaptureModal({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Browser ini tidak mendukung akses webcam");
+      return;
+    }
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "user" } })
+      .then((stream) => {
+        if (!active) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
+      .catch(() => setError("Tidak bisa akses webcam — izin ditolak atau tidak ada kamera"));
+
+    return () => {
+      active = false;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  function capture() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        onCapture(new File([blob], `webcam-${Date.now()}.jpg`, { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.9
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)" }}>
+      <div className="w-full max-w-sm rounded-md overflow-hidden" style={{ background: ink.panel, border: `1px solid ${ink.line}` }}>
+        <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: ink.line }}>
+          <span className="text-[11px] uppercase tracking-widest flex items-center gap-1" style={{ color: ink.muted }}>
+            <Camera size={12} /> Ambil Foto
+          </span>
+          <button onClick={onClose}><X size={16} color={ink.muted} /></button>
+        </div>
+        <div className="p-4">
+          {error ? (
+            <div className="text-xs py-8 text-center" style={{ color: ink.stamp }}>{error}</div>
+          ) : (
+            <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-sm" style={{ background: "#000", transform: "scaleX(-1)" }} />
+          )}
+        </div>
+        {!error && (
+          <div className="px-4 pb-4">
+            <button onClick={capture} className="w-full py-2 rounded-sm text-xs uppercase tracking-widest font-bold" style={{ background: ink.green, color: ink.bg }}>
+              Jepret
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------
    ROOT APP
    Agents + messages now live in Supabase (Postgres + Realtime), so
@@ -516,6 +597,15 @@ function AdminInboxView({ agent }) {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const [webcamOpen, setWebcamOpen] = useState(false);
+
+  function handleCameraClick() {
+    if (isMobileDevice()) {
+      cameraInputRef.current?.click();
+    } else {
+      setWebcamOpen(true);
+    }
+  }
 
   function showFileError(msg) {
     setFileError(msg);
@@ -654,7 +744,7 @@ function AdminInboxView({ agent }) {
             <button onClick={() => fileInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
               <Paperclip size={14} />
             </button>
-            <button onClick={() => cameraInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+            <button onClick={handleCameraClick} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
               <Camera size={14} />
             </button>
             <button onClick={() => recorder.start()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
@@ -675,6 +765,12 @@ function AdminInboxView({ agent }) {
           </>
         )}
       </div>
+      {webcamOpen && (
+        <WebcamCaptureModal
+          onCapture={(file) => { setPendingFile(file); setWebcamOpen(false); inputRef.current?.focus(); }}
+          onClose={() => setWebcamOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -798,6 +894,15 @@ function AgentThread({ agent, onSwitch }) {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const [webcamOpen, setWebcamOpen] = useState(false);
+
+  function handleCameraClick() {
+    if (isMobileDevice()) {
+      cameraInputRef.current?.click();
+    } else {
+      setWebcamOpen(true);
+    }
+  }
 
   const recorder = useVoiceRecorder(
     (file) => setPendingFile(file),
@@ -1008,7 +1113,7 @@ function AgentThread({ agent, onSwitch }) {
               <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
                 <Paperclip size={14} />
               </button>
-              <button onClick={() => cameraInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <button onClick={handleCameraClick} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
                 <Camera size={14} />
               </button>
               <button onClick={() => recorder.start()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
@@ -1046,6 +1151,12 @@ function AgentThread({ agent, onSwitch }) {
           </div>
         )}
       </div>
+      {webcamOpen && (
+        <WebcamCaptureModal
+          onCapture={(file) => { setPendingFile(file); setWebcamOpen(false); inputRef.current?.focus(); }}
+          onClose={() => setWebcamOpen(false)}
+        />
+      )}
     </div>
   );
 }
