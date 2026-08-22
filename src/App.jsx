@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   X, Send, Shield, UserPlus, Trash2,
   Pencil, KeyRound, LogOut, Radio, AlertTriangle, ChevronLeft, Eye, EyeOff, Lock, CornerUpLeft,
-  Paperclip, FileText, Download, Camera, Mic, Square,
+  Paperclip, FileText, Download, Camera, Mic, Square, Image as ImageIcon,
 } from "lucide-react";
 import { useAgents, useAgentMessages } from "./dataHooks";
 import { supabaseStatus } from "./supabaseClient";
@@ -596,6 +596,7 @@ function AdminInboxView({ agent }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const [webcamOpen, setWebcamOpen] = useState(false);
 
@@ -727,8 +728,9 @@ function AdminInboxView({ agent }) {
         </div>
       )}
 
-      <div className="flex gap-2">
-        <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" onChange={pickFile} className="hidden" />
+      <div className="flex gap-1.5">
+        <input ref={galleryInputRef} type="file" accept="image/*,video/*" onChange={pickFile} className="hidden" />
+        <input ref={fileInputRef} type="file" accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv,audio/*" onChange={pickFile} className="hidden" />
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
         {recorder.isRecording ? (
           <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
@@ -741,13 +743,16 @@ function AdminInboxView({ agent }) {
           </div>
         ) : (
           <>
-            <button onClick={() => fileInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+            <button onClick={() => galleryInputRef.current?.click()} className="px-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <ImageIcon size={14} />
+            </button>
+            <button onClick={() => fileInputRef.current?.click()} className="px-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
               <Paperclip size={14} />
             </button>
-            <button onClick={handleCameraClick} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+            <button onClick={handleCameraClick} className="px-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
               <Camera size={14} />
             </button>
-            <button onClick={() => recorder.start()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+            <button onClick={() => recorder.start()} className="px-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
               <Mic size={14} />
             </button>
             <input
@@ -893,6 +898,7 @@ function AgentThread({ agent, onSwitch }) {
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const [webcamOpen, setWebcamOpen] = useState(false);
 
@@ -1096,8 +1102,9 @@ function AgentThread({ agent, onSwitch }) {
             <Lock size={10} /> {lockedCount} pesan terkunci — ketik kode saja untuk buka semua
           </div>
         )}
-        <div className="flex gap-2 items-center">
-          <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" onChange={pickFile} className="hidden" />
+        <div className="flex gap-1.5 items-center">
+          <input ref={galleryInputRef} type="file" accept="image/*,video/*" onChange={pickFile} className="hidden" />
+          <input ref={fileInputRef} type="file" accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv,audio/*" onChange={pickFile} className="hidden" />
           <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={pickFile} className="hidden" />
           {recorder.isRecording ? (
             <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-sm" style={{ background: ink.panel2, border: `1px solid ${ink.stamp}` }}>
@@ -1110,13 +1117,16 @@ function AgentThread({ agent, onSwitch }) {
             </div>
           ) : (
             <>
-              <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <button onClick={() => galleryInputRef.current?.click()} className="px-2 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+                <ImageIcon size={14} />
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="px-2 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
                 <Paperclip size={14} />
               </button>
-              <button onClick={handleCameraClick} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <button onClick={handleCameraClick} className="px-2 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
                 <Camera size={14} />
               </button>
-              <button onClick={() => recorder.start()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+              <button onClick={() => recorder.start()} className="px-2 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
                 <Mic size={14} />
               </button>
               <div className="relative flex-1">
