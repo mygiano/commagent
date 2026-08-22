@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   X, Send, Shield, UserPlus, Trash2,
   Pencil, KeyRound, LogOut, Radio, AlertTriangle, ChevronLeft, Eye, EyeOff, Lock, CornerUpLeft,
+  Paperclip, FileText, Download,
 } from "lucide-react";
 import { useAgents, useAgentMessages } from "./dataHooks";
 import { supabaseStatus } from "./supabaseClient";
@@ -31,6 +32,61 @@ const mono = {
 function fmtTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — keep uploads snappy on mobile
+
+// Renders a message's file attachment, if any. Handles the "expired"
+// case (file auto-deleted after 30 days, file_url is null but the
+// filename is still on record) with a muted placeholder.
+function AttachmentView({ m }) {
+  if (m.file_name && !m.file_url) {
+    return (
+      <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[10px] mb-1" style={{ background: "rgba(0,0,0,0.15)", color: ink.muted }}>
+        <FileText size={12} /> {m.file_name} — file dihapus otomatis (30 hari)
+      </div>
+    );
+  }
+  if (!m.file_url) return null;
+
+  const isImage = (m.file_type || "").startsWith("image/");
+
+  if (isImage) {
+    return (
+      <a href={m.file_url} target="_blank" rel="noopener noreferrer" className="block mb-1">
+        <img
+          src={m.file_url}
+          alt={m.file_name || "photo"}
+          className="rounded-sm max-w-[200px] max-h-[220px] object-cover"
+          style={{ border: `1px solid ${ink.line}` }}
+        />
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={m.file_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 px-2 py-1.5 rounded-sm mb-1"
+      style={{ background: "rgba(0,0,0,0.15)" }}
+    >
+      <FileText size={14} />
+      <div className="min-w-0 text-left">
+        <div className="text-[11px] truncate max-w-[160px]">{m.file_name || "File"}</div>
+        <div className="text-[9px] opacity-70">{fmtSize(m.file_size)}</div>
+      </div>
+      <Download size={12} className="ml-auto shrink-0" />
+    </a>
+  );
 }
 
 /* ---------------------------------------------------------------
@@ -371,8 +427,12 @@ function AdminInboxView({ agent }) {
   const { messages, send } = useAgentMessages(agent.id);
   const [text, setText] = useState("");
   const [replyingTo, setReplyingTo] = useState(null); // { id, text, label }
+  const [pendingFile, setPendingFile] = useState(null);
+  const [fileError, setFileError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -388,11 +448,32 @@ function AdminInboxView({ agent }) {
     inputRef.current?.focus();
   }
 
+  function pickFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE) {
+      setFileError("File maksimal 10MB");
+      setTimeout(() => setFileError(""), 2000);
+      return;
+    }
+    setPendingFile(file);
+    inputRef.current?.focus();
+  }
+
   async function submit() {
-    if (!text.trim()) return;
-    await send("admin", text.trim(), replyingTo);
+    if (!text.trim() && !pendingFile) return;
+    setUploading(true);
+    const { error } = await send("admin", text.trim(), replyingTo, pendingFile);
+    setUploading(false);
+    if (error) {
+      setFileError(error.message);
+      setTimeout(() => setFileError(""), 2500);
+      return;
+    }
     setText("");
     setReplyingTo(null);
+    setPendingFile(null);
   }
 
   return (
@@ -422,6 +503,7 @@ function AdminInboxView({ agent }) {
                       {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                     </div>
                   )}
+                  <AttachmentView m={m} />
                   {m.text}
                 </div>
                 {mine && (
@@ -446,18 +528,40 @@ function AdminInboxView({ agent }) {
         </div>
       )}
 
+      {pendingFile && (
+        <div className="mb-2 px-3 py-2 rounded-sm flex items-center justify-between" style={{ background: ink.panel2, border: `1px solid ${ink.line}` }}>
+          <div className="text-[11px] min-w-0 flex items-center gap-2">
+            <FileText size={13} color={ink.green} />
+            <div className="min-w-0">
+              <div className="truncate max-w-[180px]">{pendingFile.name}</div>
+              <div style={{ color: ink.muted }}>{fmtSize(pendingFile.size)}</div>
+            </div>
+          </div>
+          <button onClick={() => setPendingFile(null)} style={{ color: ink.muted }}><X size={14} /></button>
+        </div>
+      )}
+      {fileError && (
+        <div className="mb-2 text-[11px] flex items-center gap-1" style={{ color: ink.stamp }}>
+          <AlertTriangle size={11} /> {fileError}
+        </div>
+      )}
+
       <div className="flex gap-2">
+        <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
+        <button onClick={() => fileInputRef.current?.click()} className="px-2.5 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+          <Paperclip size={14} />
+        </button>
         <input
           ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder={`Message ${agent.name}...`}
+          placeholder={pendingFile ? "Caption (opsional)..." : `Message ${agent.name}...`}
           className="flex-1 px-3 py-2 text-xs rounded-sm outline-none"
           style={{ background: ink.bg, border: `1px solid ${ink.line}`, color: ink.text }}
         />
-        <button onClick={submit} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg }}>
-          <Send size={14} />
+        <button onClick={submit} disabled={uploading} className="px-3 rounded-sm" style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}>
+          {uploading ? <span className="text-[10px]">…</span> : <Send size={14} />}
         </button>
       </div>
     </div>
@@ -577,8 +681,11 @@ function AgentThread({ agent, onSwitch }) {
   const [unlocked, setUnlocked] = useState({}); // { [msgId]: true } — resets whenever this thread remounts (i.e. on close/reopen)
   const [replyingTo, setReplyingTo] = useState(null); // { id, text, label }
   const [justUnlockedFlash, setJustUnlockedFlash] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const clearedAt = agent.cleared_at || null;
   const visible = clearedAt ? messages.filter((m) => new Date(m.created_at) > new Date(clearedAt)) : messages;
@@ -603,9 +710,22 @@ function AgentThread({ agent, onSwitch }) {
     setTimeout(() => setSendError(""), 1600);
   }
 
+  function pickFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE) {
+      flashError("File maksimal 10MB");
+      return;
+    }
+    setPendingFile(file);
+    inputRef.current?.focus();
+  }
+
   // Single input handles three cases:
-  //  1. "<message> <3-digit code>"  -> send that message (code stripped, verified against agent's code)
-  //  2. "<3-digit code>" alone      -> unlock every currently locked incoming message at once
+  //  1. "<message> <3-digit code>"  -> send that message/file (code stripped, verified)
+  //  2. "<3-digit code>" alone      -> if a file is attached, sends it with no caption;
+  //                                     otherwise unlocks every locked incoming message at once
   //  3. anything else / missing code at the end -> "No code" error
   async function handleSubmit() {
     const trimmed = text.trim();
@@ -621,11 +741,22 @@ function AgentThread({ agent, onSwitch }) {
     }
 
     if (tokens.length === 1) {
-      // pure code -> unlock action
       if (last !== agent.code) {
         flashError("Kode salah");
         return;
       }
+      if (pendingFile) {
+        // pure code with a file attached -> send the file, no caption
+        setUploading(true);
+        const { error } = await send("agent", "", replyingTo, pendingFile);
+        setUploading(false);
+        if (error) { flashError(error.message); return; }
+        setText("");
+        setReplyingTo(null);
+        setPendingFile(null);
+        return;
+      }
+      // pure code, no file -> unlock action
       setUnlocked((u) => {
         const next = { ...u };
         visible.forEach((m) => {
@@ -645,9 +776,13 @@ function AgentThread({ agent, onSwitch }) {
       return;
     }
     const messageText = tokens.slice(0, -1).join(" ");
-    await send("agent", messageText, replyingTo);
+    setUploading(true);
+    const { error } = await send("agent", messageText, replyingTo, pendingFile);
+    setUploading(false);
+    if (error) { flashError(error.message); return; }
     setText("");
     setReplyingTo(null);
+    setPendingFile(null);
   }
 
   return (
@@ -676,6 +811,7 @@ function AgentThread({ agent, onSwitch }) {
                         {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                       </div>
                     )}
+                    <AttachmentView m={m} />
                     {m.text}
                   </div>
                 </div>
@@ -693,6 +829,7 @@ function AgentThread({ agent, onSwitch }) {
                         {(m.reply_to.text && m.reply_to.text.length > 60) ? m.reply_to.text.slice(0, 60) + "…" : (m.reply_to.text || "")}
                       </div>
                     )}
+                    <AttachmentView m={m} />
                     {m.text}
                   </div>
                   <button onClick={() => focusReply({ id: m.id, text: m.text, label: "Command" })} style={{ color: ink.muted }}>
@@ -720,12 +857,28 @@ function AgentThread({ agent, onSwitch }) {
             <button onClick={() => setReplyingTo(null)} style={{ color: ink.muted }}><X size={14} /></button>
           </div>
         )}
+        {pendingFile && (
+          <div className="px-3 py-2 rounded-sm flex items-center justify-between" style={{ background: ink.panel2, border: `1px solid ${ink.line}` }}>
+            <div className="text-[11px] min-w-0 flex items-center gap-2">
+              <FileText size={13} color={ink.green} />
+              <div className="min-w-0">
+                <div className="truncate max-w-[160px]">{pendingFile.name}</div>
+                <div style={{ color: ink.muted }}>{fmtSize(pendingFile.size)} · akhiri dengan kode untuk kirim</div>
+              </div>
+            </div>
+            <button onClick={() => setPendingFile(null)} style={{ color: ink.muted }}><X size={14} /></button>
+          </div>
+        )}
         {lockedCount > 0 && (
           <div className="text-[10px] flex items-center gap-1" style={{ color: ink.muted }}>
             <Lock size={10} /> {lockedCount} pesan terkunci — ketik kode saja untuk buka semua
           </div>
         )}
         <div className="flex gap-2 items-center">
+          <input ref={fileInputRef} type="file" onChange={pickFile} className="hidden" />
+          <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-2 rounded-sm" style={{ border: `1px solid ${ink.line}`, color: ink.muted }}>
+            <Paperclip size={14} />
+          </button>
           <div className="relative flex-1">
             <KeyRound size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: ink.muted }} />
             <input
@@ -740,10 +893,11 @@ function AgentThread({ agent, onSwitch }) {
           </div>
           <button
             onClick={handleSubmit}
+            disabled={uploading}
             className="px-3 py-2 rounded-sm flex items-center gap-1 text-[11px] uppercase tracking-widest font-bold"
-            style={{ background: ink.green, color: ink.bg }}
+            style={{ background: ink.green, color: ink.bg, opacity: uploading ? 0.6 : 1 }}
           >
-            <Send size={13} />
+            {uploading ? <span className="text-[10px]">…</span> : <Send size={13} />}
           </button>
         </div>
         <div className="text-[9px] tracking-wide" style={{ color: ink.muted, opacity: 0.65 }}>

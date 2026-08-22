@@ -1,6 +1,31 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 
+const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15MB — aman di bawah batas 50MB tier gratis Supabase
+
+/* ---------------------------------------------------------------
+   uploadFile — upload ke Supabase Storage bucket "attachments",
+   kembalikan URL publik + metadata untuk dilampirkan ke pesan.
+--------------------------------------------------------------- */
+export async function uploadFile(file) {
+  if (file.size > MAX_FILE_BYTES) {
+    return { error: { message: `File terlalu besar (maks ${Math.floor(MAX_FILE_BYTES / 1024 / 1024)}MB)` } };
+  }
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+  const path = `${crypto.randomUUID()}.${ext}`;
+
+  const { error: uploadErr } = await supabase.storage.from("attachments").upload(path, file);
+  if (uploadErr) return { error: uploadErr };
+
+  const { data: pub } = supabase.storage.from("attachments").getPublicUrl(path);
+  return {
+    url: pub.publicUrl,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+  };
+}
+
 /* ---------------------------------------------------------------
    useAgents — live roster of all agents, synced via Supabase Realtime.
 --------------------------------------------------------------- */
@@ -162,14 +187,31 @@ export function useAgentMessages(agentId) {
     };
   }, [agentId]);
 
-  async function send(sender, text, replyTo) {
+  async function send(sender, text, replyTo, file) {
+    let fileFields = {};
+
+    if (file) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${agentId}/${Date.now()}-${safeName}`;
+      const { error: uploadErr } = await supabase.storage.from("chat-files").upload(path, file);
+      if (uploadErr) return { error: uploadErr };
+      const { data: urlData } = supabase.storage.from("chat-files").getPublicUrl(path);
+      fileFields = {
+        file_url: urlData.publicUrl,
+        file_name: file.name,
+        file_type: file.type || "application/octet-stream",
+        file_size: file.size,
+      };
+    }
+
     const { data, error: err } = await supabase
       .from("messages")
       .insert({
         agent_id: agentId,
         sender, // 'admin' | 'agent'
-        text,
+        text: text || "",
         reply_to: replyTo ? { id: replyTo.id, text: replyTo.text, label: replyTo.label } : null,
+        ...fileFields,
       })
       .select()
       .single();
